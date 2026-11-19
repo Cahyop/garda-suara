@@ -1,0 +1,3 @@
+- [ ] Build reusable campaign command center and responsive field views from the supplied brief.
+- [ ] Connect Lovable Cloud for secure accounts, campaign-isolated persistence, hierarchy permissions, and private voter data.
+- [ ] Verify the main dashboard and field workflows, responsive rendering, route metadata, and project checks.
