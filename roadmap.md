@@ -1,3 +1,4 @@
+- [x] Restore the Garda Suara preview by fixing the remaining TypeScript errors and rendering the dashboard at /.
 - [ ] Build reusable campaign command center and responsive field views from the supplied brief.
 - [ ] Add account profiles with full name, WhatsApp number, and profile photo, as requested.
 - [ ] Connect Lovable Cloud for secure accounts, campaign-isolated persistence, hierarchy permissions, and private voter data.

@@ -30,3 +30,4 @@ use the editor.
 <!-- LOVABLE:END -->
 
 - Keep platform roles in `user_roles`, campaign access in candidate-scoped memberships, and voter identity data behind server-verified access paths because campaign isolation and sensitive voter records are security boundaries.
+- When generated Cloud types omit a campaign membership table or registration RPC, keep the narrow fallback contract beside its caller and retain the authenticated RLS-scoped client; generated files are managed and must not be hand-edited.

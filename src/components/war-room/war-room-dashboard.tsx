@@ -107,6 +107,36 @@ type SupporterRecord = {
   added: string;
 };
 
+type CandidateMembership = {
+  candidate_id: string;
+  can_input_supporters: boolean;
+};
+
+type CampaignDataClient = {
+  from: (table: "candidate_memberships") => {
+    select: (columns: "candidate_id, can_input_supporters") => {
+      eq: (column: "user_id", value: string) => {
+        limit: (count: 1) => {
+          maybeSingle: () => Promise<{ data: CandidateMembership | null; error: { message: string } | null }>;
+        };
+      };
+    };
+  };
+  rpc: (functionName: "register_supporter", params: {
+    p_candidate_id: string;
+    p_nik: string;
+    p_name: string;
+    p_phone: string;
+    p_address: string | null;
+    p_gender: string;
+    p_ward: string;
+    p_source: string;
+  }) => Promise<{ error: { message: string } | null }>;
+};
+
+// Keep this narrow bridge local while the generated Cloud database types are empty.
+const campaignDataClient = supabase as unknown as CampaignDataClient;
+
 const viewLabels: Record<ViewKey, string> = {
   overview: "Ringkasan",
   field: "Data lapangan",
@@ -455,7 +485,7 @@ function DashboardContent({ onNavigate }: { onNavigate: (key: ViewKey) => void }
               <Button type="button" variant="ghost" onClick={() => onNavigate("field")} className="mt-1 h-8 w-full justify-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground">Lihat seluruh wilayah <ArrowRight className="size-3" /></Button>
             </TabsContent>
             <TabsContent value="tps" className="mt-0">
-              <StationList ward={districts[0] ?? sampleWards[0]} />
+              <StationList ward={districts[0]} />
             </TabsContent>
           </Tabs>
         </article>
@@ -534,7 +564,8 @@ function DistrictRow({ ward, onClick }: { ward: Ward; onClick: () => void }) {
   );
 }
 
-function StationList({ ward }: { ward: Ward }) {
+function StationList({ ward }: { ward: Ward | undefined }) {
+  if (!ward) return <p className="py-6 text-center text-xs text-muted-foreground">Data TPS untuk wilayah ini belum tersedia.</p>;
   const stations = [
     { number: "001", desa: "Pabean", target: 146, counted: 127, status: "Laporan masuk" },
     { number: "002", desa: "Pabean", target: 138, counted: 101, status: "Laporan masuk" },
@@ -616,7 +647,7 @@ function FieldDataContent({ onNavigate, setSupporters, setWards }: { onNavigate:
       const user = sessionResult.session?.user;
 
       if (user) {
-        const { data: membership } = await supabase
+        const { data: membership } = await campaignDataClient
           .from("candidate_memberships")
           .select("candidate_id, can_input_supporters")
           .eq("user_id", user.id)
@@ -631,7 +662,7 @@ function FieldDataContent({ onNavigate, setSupporters, setWards }: { onNavigate:
           setFormError("NIK ini sudah pernah dicoba di perangkat ini. Gunakan akun tim yang diundang untuk pengecekan terpusat.");
           return;
         }
-        const { error } = await supabase.rpc("register_supporter", {
+        const { error } = await campaignDataClient.rpc("register_supporter", {
           p_candidate_id: membership.candidate_id,
           p_nik: normalizedNik,
           p_name: newRecord.name,
@@ -769,7 +800,7 @@ function SupportersContent({ records }: { records: SupporterRecord[] }) {
 
 function HierarchyTree({ member, level = 0 }: { member: TeamMember; level?: number }) {
   const [open, setOpen] = useState(level === 0);
-  const children = level === 0 ? [sampleTeam[1], sampleTeam[2]] : level === 1 ? [sampleTeam[3], sampleTeam[4]] : [];
+  const children = (level === 0 ? [sampleTeam[1], sampleTeam[2]] : level === 1 ? [sampleTeam[3], sampleTeam[4]] : []).filter((child): child is TeamMember => child !== undefined);
   return <div className="relative"><div className="relative flex items-center gap-2.5 rounded-md border border-border/75 bg-card px-3 py-2.5" style={{ marginLeft: `${Math.min(level, 2) * 13}px` }}><span className="grid size-8 shrink-0 place-items-center rounded-full text-[9px] font-semibold"> <span className={`grid size-full place-items-center rounded-full ${member.color}`}>{member.initials}</span></span><div className="min-w-0 flex-1"><p className="truncate text-[10px] font-semibold">{member.name}</p><p className="mt-0.5 truncate text-[9px] text-muted-foreground">{member.role} · {member.area}</p></div><span className="shrink-0 text-right"><span className="block text-[10px] font-semibold">{member.recruits}</span><span className="text-[8px] text-muted-foreground">pendukung</span></span>{children.length > 0 && <Button type="button" variant="ghost" size="icon" aria-label={`${open ? "Tutup" : "Buka"} bawahan ${member.name}`} onClick={() => setOpen((value) => !value)} className="size-7"><ChevronDown className={`size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} /></Button>}</div>{open && children.length > 0 && <div className="relative mt-1.5 space-y-1.5 border-l border-dashed border-border pl-3" style={{ marginLeft: `${15 + Math.min(level, 2) * 13}px` }}>{children.map((child, index) => <HierarchyTree key={`${child.name}-${index}`} member={child} level={level + 1} />)}</div>}</div>;
 }
 
@@ -801,8 +832,8 @@ function ReportsContent({ supporters, wards }: { supporters: SupporterRecord[]; 
   const safeName = (value: string) => value.replace(/[^a-z\d-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
   const downloadFile = (fileName: string, data: string, mime: string) => { const blob = new Blob([data], { type: mime }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = fileName; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1500); };
   const exportSupporters = () => { const data = [["Nama", "WhatsApp tersamarkan", "Wilayah", "Jenis kelamin", "Status DPT", "Waktu masuk"], ...supporters.map((record) => [record.name, `••••••${record.phone.slice(-4)}`, record.area, record.gender, record.dpt, record.added])]; const csv = data.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\r\n"); downloadFile(`${safeName(sampleElection.title)}-pendukung.csv`, `\uFEFF${csv}`, "text/csv;charset=utf-8"); toast.success("Laporan pendukung diunduh", { description: "Kolom NIK dan foto KTP tidak disertakan." }); };
-  const exportWards = () => { const rows = wards.map((ward) => ({ "Kecamatan": ward.name, "DPT": ward.dpt, "Target suara": ward.target, "Suara masuk": ward.counted, "Pendukung": ward.support, "Jumlah relawan": ward.volunteers, "Jumlah TPS": ward.stations, "Contoh data": "YA" })); const xlsx = require("xlsx") as typeof import("xlsx"); const sheet = xlsx.utils.json_to_sheet(rows); const workbook = xlsx.utils.book_new(); xlsx.utils.book_append_sheet(workbook, sheet, "Per kecamatan"); xlsx.writeFile(workbook, `${safeName(sampleElection.title)}-rekap-wilayah.xlsx`); toast.success("Rekap wilayah diunduh", { description: "Berkas memuat angka simulasi dan label contohnya." }); };
-  const importExcel = async (file?: File) => { if (!file) return; setCreatedOn(file.name); try { const xlsx = await import("xlsx"); const workbook = xlsx.read(await file.arrayBuffer(), { type: "array", cellDates: false }); const firstSheet = workbook.SheetNames[0]; const rows = firstSheet ? xlsx.utils.sheet_to_json<Record<string, string | number>>(workbook.Sheets[firstSheet], { defval: "" }) : []; const available = Object.keys(rows[0] ?? {}); const matches = rows.filter((row) => Object.values(row).some((value) => /sidoarjo|waru|taman|candi|krian|buduran|porong/i.test(String(value)))).length; toast.success("File Excel dibaca", { description: `${rows.length} baris terbaca · ${matches} baris memiliki data wilayah yang dikenali. Belum ada data yang diunggah.` }); } catch { toast.error("File Excel belum dapat dibaca", { description: "Pastikan berkas .xls atau .xlsx memiliki lembar kerja yang valid." }); } };
+  const exportWards = async () => { const rows = wards.map((ward) => ({ "Kecamatan": ward.name, "DPT": ward.dpt, "Target suara": ward.target, "Suara masuk": ward.counted, "Pendukung": ward.support, "Jumlah relawan": ward.volunteers, "Jumlah TPS": ward.stations, "Contoh data": "YA" })); const xlsx = await import("xlsx"); const sheet = xlsx.utils.json_to_sheet(rows); const workbook = xlsx.utils.book_new(); xlsx.utils.book_append_sheet(workbook, sheet, "Per kecamatan"); xlsx.writeFile(workbook, `${safeName(sampleElection.title)}-rekap-wilayah.xlsx`); toast.success("Rekap wilayah diunduh", { description: "Berkas memuat angka simulasi dan label contohnya." }); };
+  const importExcel = async (file?: File) => { if (!file) return; setCreatedOn(file.name); try { const xlsx = await import("xlsx"); const workbook = xlsx.read(await file.arrayBuffer(), { type: "array", cellDates: false }); const firstSheet = workbook.SheetNames[0]; const worksheet = firstSheet ? workbook.Sheets[firstSheet] : undefined; const rows = worksheet ? xlsx.utils.sheet_to_json<Record<string, string | number>>(worksheet, { defval: "" }) : []; const matches = rows.filter((row) => Object.values(row).some((value) => /sidoarjo|waru|taman|candi|krian|buduran|porong/i.test(String(value)))).length; toast.success("File Excel dibaca", { description: `${rows.length} baris terbaca · ${matches} baris memiliki data wilayah yang dikenali. Belum ada data yang diunggah.` }); } catch { toast.error("File Excel belum dapat dibaca", { description: "Pastikan berkas .xls atau .xlsx memiliki lembar kerja yang valid." }); } };
   useEffect(() => { if (!toastOpen) return; const timer = window.setTimeout(() => setToastOpen(false), 5000); return () => window.clearTimeout(timer); }, [toastOpen]);
   return (
     <div className="space-y-5 pb-7">
@@ -854,14 +885,11 @@ function SignInPanel({ onSignedIn }: { onSignedIn: () => void }) {
       setFormError(error instanceof Error ? error.message : "Belum dapat menyambung ke layanan akun.");
     } finally { setLoading(false); }
   };
-  const oauth = async (provider: "google" | "lovable") => {
+  const oauth = async () => {
     setFormError(""); setLoading(true);
     try {
-      const { lovable } = await import("@/integrations/lovable/index");
-      const result = await lovable.auth.signInWithOAuth(provider, { redirect_uri: `${window.location.origin}/` });
-      if (result.error) throw new Error("Layanan masuk belum berhasil. Silakan coba lagi.");
-      if (result.redirected) return;
-      onSignedIn();
+      const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
+      if (error) throw new Error("Layanan masuk belum berhasil. Silakan coba lagi.");
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Layanan masuk belum tersedia.");
     } finally { setLoading(false); }
@@ -901,9 +929,8 @@ function SignInPanel({ onSignedIn }: { onSignedIn: () => void }) {
             <Button type="submit" disabled={loading} className="h-10 w-full gap-2 text-[10px] font-semibold">{loading ? "Menghubungkan…" : mode === "signin" ? "Masuk ke Suluh" : "Daftar dengan email"}<ArrowRight className="size-3.5" /></Button>
           </form>
           <div className="my-4 flex items-center gap-3"><span className="h-px flex-1 bg-border" /><span className="text-[8px] font-medium text-muted-foreground">ATAU LANJUTKAN DENGAN</span><span className="h-px flex-1 bg-border" /></div>
-          <div className="grid gap-2.5 sm:grid-cols-2">
-            <Button type="button" disabled={loading} variant="outline" onClick={() => void oauth("google")} className="h-10 gap-[10px] rounded-md border-border bg-background px-3 text-[10px] font-medium text-foreground shadow-none hover:bg-secondary/60"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/><path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z"/></svg>Masuk dengan Google</Button>
-            <Button type="button" disabled={loading} variant="outline" onClick={() => void oauth("lovable")} className="h-10 gap-2 rounded-md border-border bg-background px-3 text-[10px] font-medium text-foreground shadow-none hover:bg-secondary/60"><span aria-hidden="true" className="text-[13px] text-chart-4">♥</span>Lanjutkan dengan Lovable</Button>
+          <div className="grid gap-2.5">
+            <Button type="button" disabled={loading} variant="outline" onClick={() => void oauth()} className="h-10 gap-[10px] rounded-md border-border bg-background px-3 text-[10px] font-medium text-foreground shadow-none hover:bg-secondary/60"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/><path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z"/></svg>Masuk dengan Google</Button>
           </div>
           <p className="mt-4 text-center text-[9px] text-muted-foreground">{mode === "signin" ? "Belum punya akun?" : "Sudah memiliki akun?"} <button type="button" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setFormError(""); setFormSuccess(""); }} className="font-semibold text-chart-1 underline-offset-4 hover:underline">{mode === "signin" ? "Buat akun" : "Masuk"}</button></p>
           <div className="mt-5 border-t border-border pt-3"><p className="flex items-start gap-2 text-[8px] leading-relaxed text-muted-foreground"><ShieldCheck className="mt-0.5 size-3 shrink-0" />Akun dan profil terpisah dari akses kampanye. Masuk saja belum memberi akses ke data calon; calon dan relawan perlu diundang oleh pengelola.</p></div>
@@ -930,8 +957,8 @@ export function WarRoomDashboard() {
       const { data: result } = await supabase.auth.getUser();
       if (!alive) return;
       setUser(result.user ?? null);
-      setProfileName(typeof result.user?.user_metadata?.full_name === "string" ? result.user.user_metadata.full_name : result.user?.email?.split("@")[0] ?? "");
-      const path = result.user?.user_metadata?.avatar_path;
+      setProfileName(typeof result.user?.user_metadata?.["full_name"] === "string" ? result.user.user_metadata["full_name"] : result.user?.email?.split("@")[0] ?? "");
+      const path = result.user?.user_metadata?.["avatar_path"];
       if (typeof path === "string" && path) {
         const { data } = await supabase.storage.from("profile-photos").createSignedUrl(path, 3600);
         if (alive && data?.signedUrl) setAvatarUrl(data.signedUrl);
@@ -942,7 +969,7 @@ export function WarRoomDashboard() {
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       setUser(session?.user ?? null);
-      setProfileName(typeof session?.user.user_metadata?.full_name === "string" ? session.user.user_metadata.full_name : session?.user.email?.split("@")[0] ?? "");
+      setProfileName(typeof session?.user.user_metadata?.["full_name"] === "string" ? session.user.user_metadata["full_name"] : session?.user.email?.split("@")[0] ?? "");
       if (event === "SIGNED_OUT") { setAvatarUrl(null); setSupporters([]); setWards(sampleWards); setActive("overview"); }
       if (event === "SIGNED_IN") setLoggedOutSheetOpen(false);
     });
@@ -978,7 +1005,7 @@ export function WarRoomDashboard() {
               <div className="hidden h-8 items-center gap-2 rounded-md border border-border bg-secondary/35 px-2.5 text-[9px] text-muted-foreground sm:flex"><span className="relative size-1.5"><span className="absolute size-full animate-ping rounded-full bg-chart-2 opacity-50 motion-reduce:animate-none" /><span className="relative block size-1.5 rounded-full bg-chart-2" /></span> <span>SERVER SIMULASI</span></div>
               <span className="hidden font-mono text-[10px] tabular-nums text-muted-foreground sm:block">{clock || "09:41"} WIB</span>
               <Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label="Notifikasi" onClick={() => toast.info("Notifikasi", { description: "Tidak ada pemberitahuan baru pada data contoh." })} className="relative size-8 text-muted-foreground"><Bell className="size-4" /><span className="absolute right-[7px] top-[7px] size-1.5 rounded-full bg-chart-4 ring-2 ring-background" /></Button></TooltipTrigger><TooltipContent>Notifikasi contoh</TooltipContent></Tooltip>
-              <Sheet open={loggedOutSheetOpen} onOpenChange={setLoggedOutSheetOpen}><SheetTrigger asChild><Button type="button" variant="ghost" className="h-9 gap-2 px-1.5 sm:px-2.5"><Avatar className="size-7"><AvatarImage src={avatarUrl ?? undefined} alt="" /><AvatarFallback className="bg-chart-3/15 text-[9px] font-semibold text-chart-3">{initial || "A"}</AvatarFallback></Avatar><span className="hidden max-w-[110px] truncate text-[9px] font-medium sm:block">{memberName}</span><ChevronDown className="hidden size-3 text-muted-foreground sm:block" /></Button></SheetTrigger><SheetContent side="right" className="w-[320px] sm:w-[360px]"><SheetHeader className="sr-only"><SheetTitle>Akun {memberName}</SheetTitle></SheetHeader><div className="mt-5 flex items-center gap-3"><Avatar className="size-12"><AvatarImage src={avatarUrl ?? undefined} alt="" /><AvatarFallback className="bg-chart-3/15 text-xs font-semibold text-chart-3">{initial || "A"}</AvatarFallback></Avatar><div className="min-w-0"><p className="truncate text-sm font-semibold">{memberName}</p><p className="truncate text-xs text-muted-foreground">{user.email}</p></div></div><div className="mt-6 space-y-3 rounded-md border border-border p-3 text-xs"><div><p className="text-muted-foreground">Nama lengkap</p><p className="mt-1 font-medium">{typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : "Belum dilengkapi"}</p></div><div><p className="text-muted-foreground">WhatsApp</p><p className="mt-1 font-medium">{typeof user.user_metadata?.whatsapp === "string" ? user.user_metadata.whatsapp : "Belum dilengkapi"}</p></div><p className="border-t border-border pt-3 text-[9px] leading-relaxed text-muted-foreground">Foto profil tersimpan privat. Hak akses kampanye dikelola terpisah.</p></div><div className="absolute bottom-6 left-6 right-6"><Button type="button" variant="outline" onClick={() => void signOut()} className="w-full gap-2"><X className="size-4" />Keluar</Button></div></SheetContent></Sheet>
+              <Sheet open={loggedOutSheetOpen} onOpenChange={setLoggedOutSheetOpen}><SheetTrigger asChild><Button type="button" variant="ghost" className="h-9 gap-2 px-1.5 sm:px-2.5"><Avatar className="size-7"><AvatarImage src={avatarUrl ?? undefined} alt="" /><AvatarFallback className="bg-chart-3/15 text-[9px] font-semibold text-chart-3">{initial || "A"}</AvatarFallback></Avatar><span className="hidden max-w-[110px] truncate text-[9px] font-medium sm:block">{memberName}</span><ChevronDown className="hidden size-3 text-muted-foreground sm:block" /></Button></SheetTrigger><SheetContent side="right" className="w-[320px] sm:w-[360px]"><SheetHeader className="sr-only"><SheetTitle>Akun {memberName}</SheetTitle></SheetHeader><div className="mt-5 flex items-center gap-3"><Avatar className="size-12"><AvatarImage src={avatarUrl ?? undefined} alt="" /><AvatarFallback className="bg-chart-3/15 text-xs font-semibold text-chart-3">{initial || "A"}</AvatarFallback></Avatar><div className="min-w-0"><p className="truncate text-sm font-semibold">{memberName}</p><p className="truncate text-xs text-muted-foreground">{user.email}</p></div></div><div className="mt-6 space-y-3 rounded-md border border-border p-3 text-xs"><div><p className="text-muted-foreground">Nama lengkap</p><p className="mt-1 font-medium">{typeof user.user_metadata?.["full_name"] === "string" ? user.user_metadata["full_name"] : "Belum dilengkapi"}</p></div><div><p className="text-muted-foreground">WhatsApp</p><p className="mt-1 font-medium">{typeof user.user_metadata?.["whatsapp"] === "string" ? user.user_metadata["whatsapp"] : "Belum dilengkapi"}</p></div><p className="border-t border-border pt-3 text-[9px] leading-relaxed text-muted-foreground">Foto profil tersimpan privat. Hak akses kampanye dikelola terpisah.</p></div><div className="absolute bottom-6 left-6 right-6"><Button type="button" variant="outline" onClick={() => void signOut()} className="w-full gap-2"><X className="size-4" />Keluar</Button></div></SheetContent></Sheet>
             </div>
           </header>
 
