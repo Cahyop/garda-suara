@@ -455,7 +455,7 @@ function DashboardContent({ onNavigate }: { onNavigate: (key: ViewKey) => void }
       </section>
 
       <section aria-label="Capaian dan gender pendukung" className="grid gap-4 lg:grid-cols-12 lg:gap-5">
-        <article className="rounded-md border border-border bg-card p-4 sm:p-5 lg:col-span-8">
+        <article className="min-w-0 rounded-md border border-border bg-card p-4 sm:p-5 lg:col-span-8">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="flex items-center gap-2 text-[12px] font-semibold sm:text-[13px]"><Layers3 className="size-4 text-chart-3" /> Capaian per kecamatan</h2>
@@ -490,7 +490,7 @@ function DashboardContent({ onNavigate }: { onNavigate: (key: ViewKey) => void }
           </Tabs>
         </article>
 
-        <article className="rounded-md border border-border bg-card p-4 sm:p-5 lg:col-span-4">
+        <article className="min-w-0 rounded-md border border-border bg-card p-4 sm:p-5 lg:col-span-4">
           <div className="flex items-start justify-between gap-2">
             <div><h2 className="flex items-center gap-2 text-[12px] font-semibold sm:text-[13px]"><Users className="size-4 text-chart-4" /> Komposisi pendukung</h2><p className="mt-1 text-[10px] text-muted-foreground">Berdasarkan jenis kelamin</p></div>
             <Badge variant="secondary" className="h-5 px-1.5 text-[9px] font-medium">{formatNumber(genderTotal)} total</Badge>
@@ -948,6 +948,7 @@ export function WarRoomDashboard() {
   const [active, setActive] = useState<ViewKey>("overview");
   const [supporters, setSupporters] = useState<SupporterRecord[]>([]);
   const [wards, setWards] = useState<Ward[]>(sampleWards);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [loggedOutSheetOpen, setLoggedOutSheetOpen] = useState(false);
   const [clock, setClock] = useState("");
 
@@ -982,7 +983,7 @@ export function WarRoomDashboard() {
   }, []);
 
   const signOut = async () => { await supabase.auth.signOut(); toast.success("Anda telah keluar dari akun"); };
-  const onSelect = (key: ViewKey) => { setActive(key); setLoggedOutSheetOpen(false); };
+  const onSelect = (key: ViewKey) => { setActive(key); setLoggedOutSheetOpen(false); setMobileNavOpen(false); };
 
   if (!authReady) return <div className="flex min-h-svh items-center justify-center bg-background"><div className="flex items-center gap-3"><span className="size-2 animate-pulse rounded-full bg-chart-2 motion-reduce:animate-none" /><p className="text-xs text-muted-foreground">Menyiapkan pusat kendali…</p></div></div>;
   if (!user) return <SignInPanel onSignedIn={() => { void supabase.auth.getUser().then(({ data }) => setUser(data.user)); setAuthReady(true); }} />;
@@ -997,7 +998,7 @@ export function WarRoomDashboard() {
         <div className="flex min-h-svh min-w-0 flex-1 flex-col lg:pl-[220px] xl:pl-[238px]">
           <header className="sticky top-0 z-20 flex h-[62px] items-center justify-between border-b border-border bg-background/95 px-3 backdrop-blur-sm sm:px-5 xl:px-7">
             <div className="flex min-w-0 items-center gap-2.5">
-              <Sheet><SheetTrigger asChild><Button type="button" variant="outline" size="icon" aria-label="Buka navigasi" className="size-8 shrink-0 lg:hidden"><Menu className="size-4" /></Button></SheetTrigger><SheetContent side="left" className="w-[270px] border-sidebar-border bg-sidebar p-0 text-sidebar-foreground sm:w-[290px]"><SheetHeader className="sr-only"><SheetTitle>Navigasi Suluh</SheetTitle></SheetHeader><ScrollArea className="h-full"><NavContent active={active} onSelect={onSelect} mobile /></ScrollArea></SheetContent></Sheet>
+              <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}><SheetTrigger asChild><Button type="button" variant="outline" size="icon" aria-label="Buka navigasi" className="size-8 shrink-0 lg:hidden"><Menu className="size-4" /></Button></SheetTrigger><SheetContent side="left" className="w-[270px] border-sidebar-border bg-sidebar p-0 text-sidebar-foreground sm:w-[290px]"><SheetHeader className="sr-only"><SheetTitle>Navigasi Suluh</SheetTitle></SheetHeader><ScrollArea className="h-full"><NavContent active={active} onSelect={onSelect} mobile /></ScrollArea></SheetContent></Sheet>
               <div className="hidden items-center gap-1.5 text-[9px] text-muted-foreground sm:flex"><span className="text-muted-foreground/55">Sidoarjo</span><ChevronRight className="size-3" /><span className="font-medium text-foreground">{viewLabels[active]}</span></div>
               <div className="flex min-w-0 items-center gap-2.5 sm:hidden"><span className="grid size-8 shrink-0 place-items-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground"><Command className="size-4" /></span><div className="min-w-0"><p className="truncate text-[10px] font-bold tracking-[0.02em]">PILKADA SIDOARJO 2026</p><p className="mt-0.5 text-[8px] text-muted-foreground">{viewLabels[active]}</p></div></div>
             </div>
